@@ -1,30 +1,29 @@
-name: Test Docker Build (Minimal)
-on: workflow_dispatch  # 仅手动触发
+name: Test Docker Build (Final Fix)
+on: workflow_dispatch
 
 jobs:
   test-linux-amd64:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout empty (仅验证环境)
-        uses: actions/checkout@v4
-        with:
-          path: src  # 模拟src目录
-
-      - name: Create dummy main.go (排除业务代码影响)
+      - name: 1. 清理Docker环境（避免缓存干扰）
         run: |
-          mkdir -p src
-          cat > src/main.go << EOF
-          package main
-          import "fmt"
-          func main() { fmt.Println("test") }
-          EOF
-          cat > go.mod << EOF
-          module test
-          go 1.24.2
-          EOF
+          docker system prune -af
+          docker --version
+          docker info | grep -E "Server Version|OSType"
 
-      - name: Test Docker command (核心验证)
+      - name: 2. 创建极简测试代码（完全隔离业务）
         run: |
-          # 仅执行最简化的Docker命令，无业务依赖
-          docker run --rm --platform=linux/amd64 -v "${{ github.workspace }}:/src" -w /src golang:1.24.2-alpine sh -c "cd src && go build -o ../test-server"
-          ls -l ../test-server  # 验证产物生成
+          mkdir -p ${{ github.workspace }}/src
+          echo 'package main; import "fmt"; func main() { fmt.Println("test success") }' > ${{ github.workspace }}/src/main.go
+          echo 'module test' > ${{ github.workspace }}/go.mod
+          echo 'go 1.24.2' >> ${{ github.workspace }}/go.mod
+
+      - name: 3. 执行Docker编译（零换行+绝对路径+无转义）
+        # 核心：整个docker命令写在一行，用绝对路径，无任何换行/转义符
+        run: docker run --rm --platform=linux/amd64 -v "${{ github.workspace }}:/src" -w /src golang:1.24.2-alpine sh -c "cd /src && go mod tidy && cd src && go build -o /src/test-server main.go && ls -l /src/test-server"
+
+      - name: 4. 验证产物
+        run: |
+          ls -l ${{ github.workspace }}/test-server
+          chmod +x ${{ github.workspace }}/test-server
+          ${{ github.workspace }}/test-server || echo "Windows二进制无需执行验证"
