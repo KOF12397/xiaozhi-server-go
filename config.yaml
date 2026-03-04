@@ -307,3 +307,10 @@ mcp_pool_config:
   pool_max_size: 20
   pool_refill_size: 3
   pool_check_interval: 30
+
+# Mattermost配置
+mattermost:
+  base_url: "https://你的mattermost域名/api/v4"
+  token: "你的机器人Token"
+  summary_channel: "汇总频道的ID"
+  timeout: 10
