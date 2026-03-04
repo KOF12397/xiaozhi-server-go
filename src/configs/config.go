@@ -83,6 +83,9 @@ type Config struct {
 	VLLLM map[string]VLLMConfig `yaml:"VLLLM" json:"VLLLM"`
 
 	CMDExit []string `yaml:"CMD_exit" json:"CMD_exit"`
+	
+	// Mattermost配置
+	Mattermost MattermostConfig `yaml:"mattermost" json:"mattermost"`
 }
 
 type LocalMCPFun struct {
@@ -168,6 +171,14 @@ type VLLMConfig struct {
 	TopP        float64                `yaml:"top_p"       json:"top_p"`       // TopP参数
 	Security    SecurityConfig         `yaml:"security"    json:"security"`    // 图片安全配置
 	Extra       map[string]interface{} `yaml:",inline"     json:"extra"`       // 额外配置
+}
+
+// MattermostConfig Mattermost配置结构
+type MattermostConfig struct {
+	BaseURL        string `yaml:"base_url" json:"base_url"`
+	Token          string `yaml:"token" json:"token"`
+	SummaryChannel string `yaml:"summary_channel" json:"summary_channel"`
+	Timeout        int    `yaml:"timeout" json:"timeout"`
 }
 
 var (
