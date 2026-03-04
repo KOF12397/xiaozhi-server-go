@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 	"xiaozhi-server-go/src/core/chat"
 	"xiaozhi-server-go/src/core/image"
-	"xiaozhi-server-go/src/core/mattermost" // 新增Mattermost导入
+	"xiaozhi-server-go/src/core/mattermost"
 	"xiaozhi-server-go/src/core/providers"
 	"xiaozhi-server-go/src/core/utils"
 )
@@ -304,22 +305,87 @@ func (h *ConnectionHandler) handleImageMessage(ctx context.Context, msgMap map[s
 
 // handleMattermostMessage 处理Mattermost消息
 func (h *ConnectionHandler) handleMattermostMessage(msgMap map[string]interface{}) error {
+	startTime := time.Now()
+	
 	// 解析消息内容
 	channel, ok := msgMap["channel"].(string)
-	if !ok {
-		return fmt.Errorf("mattermost消息缺少channel参数")
+	if !ok || channel == "" {
+		return fmt.Errorf("mattermost消息缺少有效的channel参数")
 	}
 
 	message, ok := msgMap["message"].(string)
-	if !ok {
-		return fmt.Errorf("mattermost消息缺少message参数")
+	if !ok || message == "" {
+		return fmt.Errorf("mattermost消息缺少有效的message参数")
 	}
 
-	h.LogInfo(fmt.Sprintf("收到Mattermost消息请求 - 频道: %s, 消息: %s", channel, message))
+	// 可选参数解析
+	var threadID string
+	if tid, ok := msgMap["thread_id"].(string); ok {
+		threadID = tid
+	}
 
-	// 这里可以集成LLM进行消息处理
-	// 暂时直接记录日志
-	h.LogInfo("Mattermost消息处理完成")
+	h.LogInfo(fmt.Sprintf("[Mattermost] [消息接收] 频道: %s, 消息长度: %d, 线程ID: %s", 
+		channel, len(message), threadID))
+
+	// 检查Mattermost客户端是否已初始化
+	if h.mattermostClient == nil {
+		h.LogError("[Mattermost] 客户端未初始化，无法处理消息")
+		return fmt.Errorf("mattermost客户端未初始化")
+	}
+
+	// 使用LLM处理消息内容（如果消息需要智能回复）
+	responseText := message
+	if h.providers.llm != nil && len(message) > 0 {
+		// 构建简单的对话上下文
+		llmMessages := []providers.Message{
+			{
+				Role:    "system",
+				Content: "你是一个Mattermost消息处理助手，请根据用户消息生成合适的回复。",
+			},
+			{
+				Role:    "user",
+				Content: message,
+			},
+		}
+
+		// 调用LLM生成回复（简化处理，实际可根据需求调整）
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		
+		responses, err := h.providers.llm.ResponseWithFunctions(ctx, h.sessionID, llmMessages, nil)
+		if err != nil {
+			h.LogError(fmt.Sprintf("[Mattermost] LLM处理失败: %v", err))
+			// LLM失败时回退到原消息
+		} else {
+			// 收集LLM响应
+			var responseParts []string
+			for resp := range responses {
+				if resp.Error != "" {
+					h.LogError(fmt.Sprintf("[Mattermost] LLM响应错误: %s", resp.Error))
+					break
+				}
+				responseParts = append(responseParts, resp.Content)
+			}
+			if len(responseParts) > 0 {
+				responseText = strings.Join(responseParts, "")
+			}
+		}
+	}
+
+	// 发送消息到Mattermost
+	sendOptions := &mattermost.SendOptions{
+		ChannelID: channel,
+		Message:   responseText,
+		ThreadID:  threadID,
+	}
+
+	if err := h.mattermostClient.SendMessage(sendOptions); err != nil {
+		h.LogError(fmt.Sprintf("[Mattermost] 发送消息失败: %v", err))
+		return fmt.Errorf("发送mattermost消息失败: %w", err)
+	}
+
+	elapsed := time.Since(startTime)
+	h.LogInfo(fmt.Sprintf("[Mattermost] [消息处理完成] 频道: %s, 耗时: %v", channel, elapsed))
 
 	return nil
 }
