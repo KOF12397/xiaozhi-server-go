@@ -1,29 +1,187 @@
-name: Test Docker Build (Final Fix)
-on: workflow_dispatch
+name: Build Go binaries  
 
-jobs:
-  test-linux-amd64:
-    runs-on: ubuntu-latest
-    steps:
-      - name: 1. 清理Docker环境（避免缓存干扰）
-        run: |
-          docker system prune -af
-          docker --version
-          docker info | grep -E "Server Version|OSType"
+concurrency:  
+  group: ${{ github.workflow }}-${{ github.ref }}  
+  cancel-in-progress: true  
 
-      - name: 2. 创建极简测试代码（完全隔离业务）
-        run: |
-          mkdir -p ${{ github.workspace }}/src
-          echo 'package main; import "fmt"; func main() { fmt.Println("test success") }' > ${{ github.workspace }}/src/main.go
-          echo 'module test' > ${{ github.workspace }}/go.mod
-          echo 'go 1.24.2' >> ${{ github.workspace }}/go.mod
+on:  
+  push:  
+    branches: [ "main" ]  
+    tags:  
+      - 'v*'  
+  workflow_dispatch:  
 
-      - name: 3. 执行Docker编译（零换行+绝对路径+无转义）
-        # 核心：整个docker命令写在一行，用绝对路径，无任何换行/转义符
-        run: docker run --rm --platform=linux/amd64 -v "${{ github.workspace }}:/src" -w /src golang:1.24.2-alpine sh -c "cd /src && go mod tidy && cd src && go build -o /src/test-server main.go && ls -l /src/test-server"
+env:  
+  OPUS_VERSION: 1.3.1  
 
-      - name: 4. 验证产物
-        run: |
-          ls -l ${{ github.workspace }}/test-server
-          chmod +x ${{ github.workspace }}/test-server
-          ${{ github.workspace }}/test-server || echo "Windows二进制无需执行验证"
+permissions:  
+  contents: write  
+
+jobs:  
+  build-windows-amd64:  
+    runs-on: ubuntu-latest  
+    steps:  
+      - name: Checkout code  
+        uses: actions/checkout@v4  
+
+      - name: Set up Go  
+        uses: actions/setup-go@v5  
+        with:  
+          go-version: '1.24.2'  
+          cache: true  
+
+      - name: Install cross-compilation tools  
+        run: |  
+          sudo apt update -y  
+          sudo apt install -y --no-install-recommends mingw-w64 pkg-config build-essential wget upx-ucl autoconf automake libtool  
+
+      - name: Build libopus (static)  
+        run: |  
+          wget -q https://archive.mozilla.org/pub/opus/opus-${OPUS_VERSION}.tar.gz  
+          tar xf opus-${OPUS_VERSION}.tar.gz  
+          cd opus-${OPUS_VERSION}  
+          ./configure --host=x86_64-w64-mingw32 --disable-shared --enable-static --prefix="$HOME/opus-win"  
+          make -j$(nproc)  
+          make install  
+          cd ..  
+
+      - name: Build Windows binary  
+        run: |  
+          export CGO_ENABLED=1  
+          export GOOS=windows  
+          export GOARCH=amd64  
+          export CC=x86_64-w64-mingw32-gcc  
+          export PKG_CONFIG_PATH="$HOME/opus-win/lib/pkgconfig"  
+          cd src  
+          go build -v -ldflags "-s -w" -o ../windows-amd64-server.exe  
+          cp ../windows-amd64-server.exe ../windows-amd64-server-upx.exe  
+          upx --lzma ../windows-amd64-server-upx.exe || true  
+
+      - name: Upload Windows binaries  
+        uses: actions/upload-artifact@v4  
+        with:  
+          name: windows-binaries  
+          path: |  
+            windows-amd64-server.exe  
+            windows-amd64-server-upx.exe  
+
+  build-linux:  
+    strategy:  
+      matrix:  
+        include:  
+          - arch: amd64  
+            runs-on: ubuntu-latest  
+          - arch: arm64  
+            runs-on: ubuntu-24.04-arm  
+    runs-on: ${{ matrix.runs-on }}  
+    steps:  
+      - name: Checkout code  
+        uses: actions/checkout@v4  
+
+      - name: Set up Go  
+        uses: actions/setup-go@v5  
+        with:  
+          go-version: '1.24.2'  
+          cache: true  
+
+      - name: Install system dependencies (无Docker，直接装libopus)  
+        run: |  
+          sudo apt update -y  
+          sudo apt install -y --no-install-recommends build-essential pkg-config libopus-dev upx-ucl  
+
+      - name: Build Linux binary (纯主机编译)  
+        run: |  
+          export CGO_ENABLED=1  
+          export GOOS=linux  
+          export GOARCH=${{ matrix.arch }}  
+          cd src  
+          go build -v -ldflags "-s -w" -o ../linux-${{ matrix.arch }}-server  
+          cp ../linux-${{ matrix.arch }}-server ../linux-${{ matrix.arch }}-server-upx  
+          upx --lzma ../linux-${{ matrix.arch }}-server-upx || true  
+
+      - name: Upload Linux binaries  
+        uses: actions/upload-artifact@v4  
+        with:  
+          name: linux-binaries-${{ matrix.arch }}  
+          path: |  
+            linux-${{ matrix.arch }}-server  
+            linux-${{ matrix.arch }}-server-upx  
+
+  build-android:  
+    runs-on: ubuntu-latest  
+    strategy:  
+      matrix:  
+        include:  
+          - arch: arm64  
+            target: aarch64-linux-android  
+            target_arch: arm64-v8a  
+          - arch: arm  
+            target: armv7a-linux-androideabi  
+            target_arch: armeabi-v7a  
+    env:  
+      NDK_VERSION: r26d  
+      ANDROID_API: 21  
+    steps:  
+      - name: Checkout repo  
+        uses: actions/checkout@v4  
+
+      - name: Set up Go  
+        uses: actions/setup-go@v5  
+        with:  
+          go-version: '1.24.2'  
+          cache: true  
+
+      - name: Install NDK & libopus  
+        run: |  
+          sudo apt update -y  
+          sudo apt install -y --no-install-recommends pkg-config wget unzip build-essential  
+          wget -q https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip  
+          unzip -q android-ndk-${NDK_VERSION}-linux.zip  
+
+      - name: Build Android binary  
+        run: |  
+          export TOOLCHAIN=$PWD/android-ndk-${NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64  
+          export CC=$TOOLCHAIN/bin/${{ matrix.target }}${ANDROID_API}-clang  
+          export CGO_ENABLED=1  
+          export GOOS=android  
+          export GOARCH=${{ matrix.arch }}  
+          cd src  
+          go build -v -ldflags "-s -w" -o ../android-${{ matrix.arch }}-server  
+
+      - name: Upload Android binary  
+        uses: actions/upload-artifact@v4  
+        with:  
+          name: android-${{ matrix.arch }}-server  
+          path: android-${{ matrix.arch }}-server  
+
+  release:  
+    needs:  
+      - build-windows-amd64  
+      - build-linux  
+      - build-android  
+    if: startsWith(github.ref, 'refs/tags/')  
+    runs-on: ubuntu-latest  
+    steps:  
+      - name: Download all artifacts  
+        uses: actions/download-artifact@v4  
+        with:  
+          path: artifacts  
+
+      - name: Create GitHub Release  
+        uses: softprops/action-gh-release@v2  
+        with:  
+          tag_name: ${{ github.ref_name }}  
+          name: ${{ github.ref_name }}  
+          draft: false  
+          prerelease: false  
+          files: |  
+            artifacts/android-arm64-server  
+            artifacts/android-arm-server  
+            artifacts/windows-amd64-server.exe  
+            artifacts/windows-amd64-server-upx.exe  
+            artifacts/linux-amd64-server  
+            artifacts/linux-amd64-server-upx  
+            artifacts/linux-arm64-server  
+            artifacts/linux-arm64-server-upx  
+        env:  
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
