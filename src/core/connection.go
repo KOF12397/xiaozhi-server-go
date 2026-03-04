@@ -18,6 +18,7 @@ import (
 	"xiaozhi-server-go/src/core/chat"
 	"xiaozhi-server-go/src/core/function"
 	"xiaozhi-server-go/src/core/image"
+	"xiaozhi-server-go/src/core/mattermost"
 	"xiaozhi-server-go/src/core/mcp"
 	"xiaozhi-server-go/src/core/pool"
 	"xiaozhi-server-go/src/core/providers"
@@ -150,6 +151,9 @@ type ConnectionHandler struct {
 
 	mcpResultHandlers map[string]MCPResultHandler // MCP处理器映射
 	ctx               context.Context
+
+	// Mattermost客户端
+	mattermostClient *mattermost.Client
 }
 
 // NewConnectionHandler 创建新的连接处理器
@@ -240,6 +244,21 @@ func NewConnectionHandler(
 	handler.dialogueManager.SetSystemMessage(prompt)
 	handler.functionRegister = function.NewFunctionRegistry()
 	handler.initMCPResultHandlers()
+
+	// 在现有初始化代码后添加
+	if config.Mattermost.BaseURL != "" {
+		handler.mattermostClient = mattermost.NewClient(&config.Mattermost, logger)
+		if err := handler.mattermostClient.Initialize(); err != nil {
+			logger.Error("Mattermost客户端初始化失败: %v", err)
+		}
+	}
+
+	// 补充：增加functionRegister非空校验  
+	if config.Mattermost.BaseURL != "" && handler.mattermostClient != nil && handler.functionRegister != nil {  
+		mattermostFuncHandler := mattermost.NewFunctionHandler(handler.mattermostClient, logger)  
+		handler.functionRegister.RegisterFunction("send_to_mattermost", mattermostFuncHandler.SendToMattermost)  
+		logger.Info("Mattermost函数已注册: send_to_mattermost")  
+	}
 
 	return handler
 }
@@ -763,6 +782,20 @@ func (h *ConnectionHandler) handleChatMessage(ctx context.Context, text string) 
 	return h.genResponseByLLM(ctx, h.dialogueManager.GetLLMDialogue(), currentRound)
 }
 
+// handleMattermostFunction 处理Mattermost函数调用
+func (h *ConnectionHandler) handleMattermostFunction(functionName string, arguments map[string]interface{}) (interface{}, error) {  
+	if h.mattermostClient == nil {  
+		return nil, fmt.Errorf("Mattermost客户端未初始化")  
+	}  
+
+	// 补充：添加10秒超时上下文，避免阻塞  
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)  
+	defer cancel()  
+	  
+	funcHandler := mattermost.NewFunctionHandler(h.mattermostClient, h.logger)  
+	return funcHandler.SendToMattermost(ctx, arguments)  
+}
+
 func (h *ConnectionHandler) genResponseByLLM(ctx context.Context, messages []providers.Message, round int) error {
 	defer func() {
 		if r := recover(); r != nil {
@@ -932,7 +965,27 @@ func (h *ConnectionHandler) genResponseByLLM(ctx context.Context, messages []pro
 
 			} else {
 				// 处理普通函数调用
-				//h.functionRegister.CallFunction(functionName, functionCallData)
+				switch functionName {  
+				case "send_to_mattermost":  
+					result, err := h.handleMattermostFunction(functionName, arguments)  
+					if err != nil {  
+						h.LogError(fmt.Sprintf("Mattermost函数调用失败: %v", err))  
+						actionResult := types.ActionResponse{  
+							Action: types.ActionTypeError,  
+							Result: err.Error(),  
+						}  
+						h.handleFunctionResult(actionResult, functionCallData, textIndex)  
+					} else {  
+						actionResult := types.ActionResponse{  
+							Action: types.ActionTypeResponse,  
+							Response: result,  
+						}  
+						h.handleFunctionResult(actionResult, functionCallData, textIndex)  
+					}  
+				default:  
+					// 其他函数处理逻辑  
+					h.logger.Warn("未知的函数调用: %s", functionName)  
+				}
 			}
 		}
 	}
