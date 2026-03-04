@@ -39,11 +39,18 @@ func TestClient(t *testing.T) {
     }  
   
     if len(missingEnvs) > 0 {  
-        t.Skipf("未配置Mattermost测试环境变量，缺少: %v", missingEnvs)  
+        t.Skipf("未配置Mattermost测试环境变量，跳过测试。缺少: %v", missingEnvs)  
         return  
     }  
   
-    // 创建日志器（使用完整的LogCfg结构）  
+    // 创建配置  
+    config := &configs.MattermostConfig{  
+        BaseURL: baseURL,  
+        Token:   token,  
+        Timeout: testTimeoutSeconds,  
+    }  
+  
+    // 创建日志器 - 提供所有必需字段  
     logger, err := utils.NewLogger(&utils.LogCfg{  
         LogLevel:  "DEBUG",  
         LogFormat: "{time:YYYY-MM-DD HH:mm:ss} - {level} - {message}",  
@@ -52,13 +59,6 @@ func TestClient(t *testing.T) {
     })  
     if err != nil {  
         t.Fatalf("创建日志器失败: %v", err)  
-    }  
-  
-    // 创建客户端配置  
-    config := &configs.MattermostConfig{  
-        BaseURL: baseURL,  
-        Token:   token,  
-        Timeout: testTimeoutSeconds,  
     }  
   
     // 创建客户端  
@@ -75,7 +75,7 @@ func TestClient(t *testing.T) {
     }  
   
     // 测试消息发送  
-    ctx, cancel := context.WithTimeout(context.Background(), time.Duration(testTimeoutSeconds)*time.Second)  
+    ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.Timeout)*time.Second)  
     defer cancel()  
   
     err = client.SendMessage(ctx, channel, testMessage)  
@@ -84,10 +84,7 @@ func TestClient(t *testing.T) {
         return  
     }  
   
-    t.Logf("✅ Mattermost客户端测试成功 - 频道: %s", channel)  
-  
-    // 清理资源  
-    client.Cleanup()  
+    t.Log("✅ Mattermost客户端测试通过")  
 }  
   
 // BenchmarkClient_SendMessage 性能测试  
@@ -97,13 +94,19 @@ func BenchmarkClient_SendMessage(b *testing.B) {
     channel := os.Getenv(envVarTestChannel)  
   
     if baseURL == "" || token == "" || channel == "" {  
-        b.Skip("未配置Mattermost测试环境变量")  
+        b.Skip("未配置Mattermost测试环境变量，跳过性能测试")  
         return  
     }  
   
-    // 创建日志器（使用完整的LogCfg结构）  
+    config := &configs.MattermostConfig{  
+        BaseURL: baseURL,  
+        Token:   token,  
+        Timeout: testTimeoutSeconds,  
+    }  
+  
+    // 创建日志器 - 提供所有必需字段  
     logger, err := utils.NewLogger(&utils.LogCfg{  
-        LogLevel:  "ERROR", // 性能测试使用ERROR级别减少日志  
+        LogLevel:  "INFO",  
         LogFormat: "{time:YYYY-MM-DD HH:mm:ss} - {level} - {message}",  
         LogDir:    "logs",  
         LogFile:   "benchmark.log",  
@@ -112,11 +115,6 @@ func BenchmarkClient_SendMessage(b *testing.B) {
         b.Fatalf("创建日志器失败: %v", err)  
     }  
   
-    config := &configs.MattermostConfig{  
-        BaseURL: baseURL,  
-        Token:   token,  
-        Timeout: testTimeoutSeconds,  
-    }  
     client := NewClient(config, logger)  
     _ = client.Initialize()  
     defer client.Cleanup()  
