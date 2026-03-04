@@ -89,6 +89,9 @@ func LoadConfigAndLogger() (*configs.Config, *utils.Logger, error) {
 	database.SetLogger(logger)
 	database.InsertDefaultConfigIfNeeded(database.GetDB())
 
+	// 添加Mattermost配置加载验证日志
+	logger.Info("✅ Mattermost配置加载成功：%+v", config.Mattermost)
+
 	return config, logger, nil
 }
 
