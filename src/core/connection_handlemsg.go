@@ -93,7 +93,7 @@ func (h *ConnectionHandler) processClientTextMessage(ctx context.Context, text s
 	case "mcp":
 		return h.mcpManager.HandleXiaoZhiMCPMessage(msgMap)
 	case "mattermost":
-		return h.handleMattermostMessage(msgMap) // 新增Mattermost消息处理
+		return h.handleMattermostMessage(msgMap)
 	default:
 		h.logger.Warn("=== 未知消息类型 ===", map[string]interface{}{
 			"unknown_type": msgType,
@@ -300,4 +300,26 @@ func (h *ConnectionHandler) handleImageMessage(ctx context.Context, msgMap map[s
 	}
 
 	return h.genResponseByVLLM(ctx, messages, imageData, text, currentRound)
+}
+
+// handleMattermostMessage 处理Mattermost消息
+func (h *ConnectionHandler) handleMattermostMessage(msgMap map[string]interface{}) error {
+	// 解析消息内容
+	channel, ok := msgMap["channel"].(string)
+	if !ok {
+		return fmt.Errorf("mattermost消息缺少channel参数")
+	}
+
+	message, ok := msgMap["message"].(string)
+	if !ok {
+		return fmt.Errorf("mattermost消息缺少message参数")
+	}
+
+	h.LogInfo(fmt.Sprintf("收到Mattermost消息请求 - 频道: %s, 消息: %s", channel, message))
+
+	// 这里可以集成LLM进行消息处理
+	// 暂时直接记录日志
+	h.LogInfo("Mattermost消息处理完成")
+
+	return nil
 }
