@@ -97,21 +97,20 @@ jobs:
           docker run --rm --platform=linux/${{ matrix.arch }} \  
             -v "${{ github.workspace }}:/src" \  
             -w /src \  
-            golang:1.24.2-alpine sh -c "\  
-              apk add --no-cache build-base autoconf automake libtool pkgconfig musl-dev wget upx && \  
-              wget https://archive.mozilla.org/pub/opus/opus-${OPUS_VERSION}.tar.gz && \  
-              tar xf opus-${OPUS_VERSION}.tar.gz && \  
-              cd opus-${OPUS_VERSION} && \  
-              ./configure --enable-static --disable-shared --disable-doc --disable-extra-programs && \  
-              make -j$(nproc) && make install && \  
-              cd /src && go mod tidy && cd src && \  
+            golang:1.23-alpine sh -c '  
+              apk add --no-cache build-base autoconf automake libtool pkgconfig musl-dev wget upx &&  
+              wget https://archive.mozilla.org/pub/opus/opus-${OPUS_VERSION}.tar.gz &&  
+              tar xf opus-${OPUS_VERSION}.tar.gz &&  
+              cd opus-${OPUS_VERSION} &&  
+              ./configure --enable-static --disable-shared --disable-doc --disable-extra-programs &&  
+              make -j$(nproc) && make install &&  
+              cd /src && go mod tidy && cd src &&  
               CGO_ENABLED=1 GOOS=linux GOARCH=${{ matrix.arch }} \  
-                go build -v -ldflags '-s -w -extldflags \"-static\"' \  
-                -o ../linux-${{ matrix.arch }}-server && \  
-              # copy original binary before compression  
-              cp ../linux-${{ matrix.arch }}-server ../linux-${{ matrix.arch }}-server-upx && \  
-              upx --lzma ../linux-${{ matrix.arch }}-server-upx\  
-            "  
+                go build -v -ldflags "-s -w -extldflags \"-static\"" \  
+                -o ../linux-${{ matrix.arch }}-server &&  
+              cp ../linux-${{ matrix.arch }}-server ../linux-${{ matrix.arch }}-server-upx &&  
+              upx --lzma ../linux-${{ matrix.arch }}-server-upx  
+            '  
   
       - name: Upload Linux binaries  
         uses: actions/upload-artifact@v4  
@@ -172,7 +171,6 @@ jobs:
           echo "NDK_DIR=$PWD/android-ndk-${NDK_VERSION}" >> $GITHUB_ENV  
           echo "TOOLCHAIN=$PWD/android-ndk-${NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64" >> $GITHUB_ENV  
   
-  
       - name: Download libopus  
         run: |  
           wget https://archive.mozilla.org/pub/opus/opus-${OPUS_VERSION}.tar.gz  
@@ -217,7 +215,6 @@ jobs:
         with:  
           name: android-${{ matrix.arch }}-server  
           path: android-${{ matrix.arch }}-server  
-  
   
   release:  
     needs:  
@@ -276,4 +273,3 @@ jobs:
             artifacts/linux-arm64-server-upx  
         env:  
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-文件说明
