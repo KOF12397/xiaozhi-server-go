@@ -1,4 +1,8 @@
-name: Minimal Build (Only Linux AMD64)
+name: Build Linux AMD64 Binary (No Docker)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: ["main"]
@@ -12,37 +16,53 @@ jobs:
   build-linux-amd64:
     runs-on: ubuntu-latest
     steps:
+      # 步骤1：拉取代码
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # 步骤2：安装Go环境
       - name: Set up Go 1.24.2
         uses: actions/setup-go@v5
         with:
           go-version: '1.24.2'
           cache: true
 
-      - name: 安装CGO依赖（关键！解决opus-go编译问题）
+      # 步骤3：安装CGO和Opus依赖（解决opus-go编译问题）
+      - name: Install build dependencies
         run: |
           sudo apt update -y
           sudo apt install -y --no-install-recommends \
-            build-essential pkg-config libopus-dev  # 安装opus系统库+编译工具
+            build-essential pkg-config libopus-dev upx-ucl
 
-      - name: Build Linux binary (启用CGO，适配opus-go)
+      # 步骤4：编译二进制（启用CGO，无Docker）
+      - name: Build Linux AMD64 binary
         run: |
           cd src
-          # 核心修改：启用CGO（必须！opus-go依赖CGO）
-          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -v -ldflags "-s -w" -o ../linux-amd64-server
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
+          go build -v -ldflags "-s -w" -o ../linux-amd64-server
 
-      - name: Upload binary
+          # 可选：压缩二进制
+          cp ../linux-amd64-server ../linux-amd64-server-upx
+          upx --lzma ../linux-amd64-server-upx || echo "UPX压缩失败，跳过"
+
+      # 步骤5：上传产物
+      - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: linux-amd64-server
-          path: linux-amd64-server
+          name: linux-amd64-binaries
+          path: |
+            linux-amd64-server
+            linux-amd64-server-upx
 
-      - name: Create Release (only for tags)
+      # 步骤6：打Tag时创建Release
+      - name: Create GitHub Release (only for tags)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: linux-amd64-server
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          files: |
+            linux-amd64-server
+            linux-amd64-server-upx
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
