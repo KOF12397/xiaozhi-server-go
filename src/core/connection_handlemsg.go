@@ -8,7 +8,7 @@ import (
 	"time"
 	"xiaozhi-server-go/src/core/chat"
 	"xiaozhi-server-go/src/core/image"
-	"xiaozhi-server-go/src/core/mattermost"
+	// 移除多余的别名引用，因为不再使用 mattermost.SendOptions
 	"xiaozhi-server-go/src/core/providers"
 	"xiaozhi-server-go/src/core/utils"
 )
@@ -318,14 +318,8 @@ func (h *ConnectionHandler) handleMattermostMessage(msgMap map[string]interface{
 		return fmt.Errorf("mattermost消息缺少有效的message参数")
 	}
 
-	// 可选参数解析
-	var threadID string
-	if tid, ok := msgMap["thread_id"].(string); ok {
-		threadID = tid
-	}
-
-	h.LogInfo(fmt.Sprintf("[Mattermost] [消息接收] 频道: %s, 消息长度: %d, 线程ID: %s", 
-		channel, len(message), threadID))
+	h.LogInfo(fmt.Sprintf("[Mattermost] [消息接收] 频道: %s, 消息长度: %d", 
+		channel, len(message)))
 
 	// 检查Mattermost客户端是否已初始化
 	if h.mattermostClient == nil {
@@ -373,13 +367,12 @@ func (h *ConnectionHandler) handleMattermostMessage(msgMap map[string]interface{
 	}
 
 	// 发送消息到Mattermost
-	sendOptions := &mattermost.SendOptions{
-		ChannelID: channel,
-		Message:   responseText,
-		ThreadID:  threadID,
-	}
-
-	if err := h.mattermostClient.SendMessage(sendOptions); err != nil {
+	// 修复：改为直接调用 SendMessage(ctx, channel, message)
+	// 注意：这里丢弃了 thread_id 参数，因为新接口签名不支持
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
+	if err := h.mattermostClient.SendMessage(ctx, channel, responseText); err != nil {
 		h.LogError(fmt.Sprintf("[Mattermost] 发送消息失败: %v", err))
 		return fmt.Errorf("发送mattermost消息失败: %w", err)
 	}
