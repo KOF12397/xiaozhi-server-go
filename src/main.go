@@ -20,6 +20,7 @@ import (
 	"xiaozhi-server-go/src/configs/database"
 	"xiaozhi-server-go/src/core/auth"
 	"xiaozhi-server-go/src/core/auth/store"
+	"xiaozhi-server-go/src/core/mattermost" // 新增Mattermost导入
 	"xiaozhi-server-go/src/core/pool"
 	"xiaozhi-server-go/src/core/transport"
 	"xiaozhi-server-go/src/core/transport/websocket"
@@ -289,6 +290,21 @@ func StartHttpServer(
 	// 启动系统配置服务
 	systemConfigService := cfg.NewSystemConfigService(logger, database.GetDB())
 	systemConfigService.RegisterRoutes(apiGroup)
+
+	// 启动Mattermost服务
+	if config.Mattermost.BaseURL != "" {
+		mattermostClient := mattermost.NewClient(&config.Mattermost, logger)
+		if err := mattermostClient.Initialize(); err != nil {
+			logger.Error("Mattermost客户端初始化失败: %v", err)
+		} else {
+			mattermostHandler := mattermost.NewHandler(mattermostClient, logger)
+			mattermostGroup := apiGroup.Group("/mattermost")
+			{
+				mattermostGroup.POST("/send", mattermostHandler.Send)
+			}
+			logger.Info("Mattermost服务已启动，路由: /api/mattermost/send")
+		}
+	}
 
 	// HTTP Server（支持优雅关机）
 	httpServer := &http.Server{
