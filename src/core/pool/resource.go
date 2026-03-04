@@ -14,7 +14,6 @@ import (
 * 支持资源的创建和销毁，资源池的动态扩展和收缩。
 * 资源池的维护协程会定期检查当前资源数量，
 * 如果资源数量低于设定的补充阈值，则创建新的资源，
-
  */
 
 // ResourceFactory 资源工厂接口
@@ -112,8 +111,14 @@ func (p *ResourcePool) initializePool() error {
 	return nil
 }
 
-// maintain 维护资源池
+// maintain 维护资源池（新增容错逻辑：确保检查间隔为正数）
 func (p *ResourcePool) maintain(refillSize int, checkInterval time.Duration) {
+	// 容错：如果传入的检查间隔<=0，强制设置为5秒，避免NewTicker panic
+	if checkInterval <= 0 {
+		p.logger.Warn("%s 资源池检查间隔配置为非正数(%v)，强制设置为5秒", p.poolName, checkInterval)
+		checkInterval = 5 * time.Second
+	}
+	
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 
