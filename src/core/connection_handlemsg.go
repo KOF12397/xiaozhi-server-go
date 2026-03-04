@@ -7,6 +7,7 @@ import (
 	"strings"
 	"xiaozhi-server-go/src/core/chat"
 	"xiaozhi-server-go/src/core/image"
+	"xiaozhi-server-go/src/core/mattermost" // 新增Mattermost导入
 	"xiaozhi-server-go/src/core/providers"
 	"xiaozhi-server-go/src/core/utils"
 )
@@ -91,6 +92,8 @@ func (h *ConnectionHandler) processClientTextMessage(ctx context.Context, text s
 		return h.handleImageMessage(ctx, msgMap)
 	case "mcp":
 		return h.mcpManager.HandleXiaoZhiMCPMessage(msgMap)
+	case "mattermost":
+		return h.handleMattermostMessage(msgMap) // 新增Mattermost消息处理
 	default:
 		h.logger.Warn("=== 未知消息类型 ===", map[string]interface{}{
 			"unknown_type": msgType,
