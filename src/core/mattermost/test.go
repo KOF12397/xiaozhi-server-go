@@ -2,6 +2,7 @@ package mattermost
   
 import (  
     "context"  
+    "fmt"  
     "os"  
     "testing"  
     "time"  
@@ -20,12 +21,12 @@ const (
   
 // TestClient 测试Mattermost客户端完整流程  
 func TestClient(t *testing.T) {  
-    // 从环境变量读取测试配置（增加日志提示）  
+    // 从环境变量读取测试配置  
     baseURL := os.Getenv(envVarBaseURL)  
     token := os.Getenv(envVarToken)  
     channel := os.Getenv(envVarTestChannel)  
   
-    // 检查配置完整性（更友好的提示）  
+    // 检查配置完整性  
     missingEnvs := make([]string, 0)  
     if baseURL == "" {  
         missingEnvs = append(missingEnvs, envVarBaseURL)  
@@ -37,10 +38,17 @@ func TestClient(t *testing.T) {
         missingEnvs = append(missingEnvs, envVarTestChannel)  
     }  
     if len(missingEnvs) > 0 {  
-        t.Skipf("跳过Mattermost测试：缺少环境变量 %v，请配置后重新运行", missingEnvs)  
+        t.Skipf("跳过Mattermost测试：缺少环境变量 %v", missingEnvs)  
     }  
   
-    // 初始化日志器（增加错误处理）  
+    // 创建配置  
+    config := &configs.MattermostConfig{  
+        BaseURL: baseURL,  
+        Token:   token,  
+        Timeout: testTimeoutSeconds,  
+    }  
+  
+    // 创建日志器（使用完整的LogCfg结构）  
     logger, err := utils.NewLogger(&utils.LogCfg{  
         LogLevel:  "DEBUG",  
         LogFormat: "{time:YYYY-MM-DD HH:mm:ss} - {level} - {message}",  
@@ -51,24 +59,16 @@ func TestClient(t *testing.T) {
         t.Fatalf("创建日志器失败: %v", err)  
     }  
   
-    // 创建客户端配置  
-    config := &configs.MattermostConfig{  
-        BaseURL: baseURL,  
-        Token:   token,  
-        Timeout: testTimeoutSeconds,  
-    }  
-  
-    // 测试客户端创建  
+    // 创建客户端  
     client := NewClient(config, logger)  
     if client == nil {  
-        t.Fatal("创建Mattermost客户端失败")  
+        t.Fatal("创建客户端失败")  
     }  
   
-    // 测试客户端初始化  
+    // 测试初始化  
     err = client.Initialize()  
     if err != nil {  
-        t.Errorf("Mattermost客户端初始化失败: %v", err)  
-        return  
+        t.Errorf("客户端初始化失败: %v", err)  
     }  
   
     // 测试消息发送  
@@ -77,18 +77,14 @@ func TestClient(t *testing.T) {
       
     err = client.SendMessage(ctx, channel, testMessage)  
     if err != nil {  
-        t.Errorf("Mattermost消息发送失败: %v", err)  
-        return  
+        t.Errorf("发送消息失败: %v", err)  
     }  
   
-    // 测试资源清理  
+    // 清理资源  
     err = client.Cleanup()  
     if err != nil {  
-        t.Errorf("Mattermost客户端清理失败: %v", err)  
-        return  
+        t.Errorf("清理资源失败: %v", err)  
     }  
-  
-    t.Log("✅ Mattermost客户端测试通过")  
 }  
   
 // BenchmarkClient_SendMessage 性能测试  
@@ -96,17 +92,18 @@ func BenchmarkClient_SendMessage(b *testing.B) {
     baseURL := os.Getenv(envVarBaseURL)  
     token := os.Getenv(envVarToken)  
     channel := os.Getenv(envVarTestChannel)  
+  
     if baseURL == "" || token == "" || channel == "" {  
         b.Skip("缺少环境变量，跳过基准测试")  
     }  
   
     logger, _ := utils.NewLogger(&utils.LogCfg{  
-        LogLevel:  "error",  
+        LogLevel:  "ERROR",  
         LogFormat: "{time:YYYY-MM-DD HH:mm:ss} - {level} - {message}",  
         LogDir:    "logs",  
         LogFile:   "benchmark.log",  
     })  
-      
+  
     config := &configs.MattermostConfig{  
         BaseURL: baseURL,  
         Token:   token,  
@@ -117,7 +114,7 @@ func BenchmarkClient_SendMessage(b *testing.B) {
     defer client.Cleanup()  
   
     ctx := context.Background()  
-    b.ResetTimer() // 重置计时器，排除初始化耗时  
+    b.ResetTimer()  
   
     for i := 0; i < b.N; i++ {  
         msg := fmt.Sprintf("基准测试消息 - %d", i)  
@@ -125,9 +122,8 @@ func BenchmarkClient_SendMessage(b *testing.B) {
     }  
 }  
   
-// TestClient_WithoutLogger 测试无日志器场景（兼容优化后的client.go）  
+// TestClient_WithoutLogger 测试无日志器场景  
 func TestClient_WithoutLogger(t *testing.T) {  
-    // 测试传入nil logger是否会panic  
     config := &configs.MattermostConfig{  
         BaseURL: "http://test.example.com",  
         Token:   "test-token",  
@@ -136,7 +132,6 @@ func TestClient_WithoutLogger(t *testing.T) {
     if client == nil {  
         t.Fatal("创建客户端失败（nil logger）")  
     }  
-    // 测试初始化不会panic  
     err := client.Initialize()  
     if err != nil {  
         t.Errorf("初始化客户端（nil logger）失败: %v", err)  
