@@ -1,282 +1,47 @@
-name: Build Go binaries (No Docker)
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
+name: Minimal Build (Only Linux AMD64)
 on:
   push:
     branches: ["main"]
     tags: ['v*']
   workflow_dispatch:
 
-env:
-  OPUS_VERSION: 1.3.1
-  GO_VERSION: 1.24.2
-
 permissions:
   contents: write
 
 jobs:
-  # ========== Windows AMD64 编译（纯主机，无Docker） ==========
-  build-windows-amd64:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: Install Windows交叉编译工具链
-        run: |
-          sudo apt update -y
-          sudo apt install -y --no-install-recommends \
-            mingw-w64 pkg-config build-essential wget upx-ucl \
-            autoconf automake libtool
-
-      - name: 编译静态libopus（Windows）
-        run: |
-          wget -q https://archive.mozilla.org/pub/opus/opus-${OPUS_VERSION}.tar.gz
-          tar xf opus-${OPUS_VERSION}.tar.gz
-          cd opus-${OPUS_VERSION}
-          ./configure \
-            --host=x86_64-w64-mingw32 \
-            --disable-shared --enable-static \
-            --disable-doc --disable-extra-programs \
-            --prefix="$HOME/opus-win"
-          make -j$(nproc)
-          make install
-          cd ..
-
-      - name: 编译Windows二进制
-        run: |
-          export CGO_ENABLED=1
-          export GOOS=windows
-          export GOARCH=amd64
-          export CC=x86_64-w64-mingw32-gcc
-          export PKG_CONFIG_PATH="$HOME/opus-win/lib/pkgconfig"
-          export CGO_CFLAGS="-I$HOME/opus-win/include"
-          export CGO_LDFLAGS="-L$HOME/opus-win/lib -lopus -static"
-          
-          cd src
-          go mod tidy
-          go build -v \
-            -ldflags "-s -w" \
-            -o ../windows-amd64-server.exe
-          
-          # 压缩二进制（失败不影响）
-          cp ../windows-amd64-server.exe ../windows-amd64-server-upx.exe
-          upx --lzma ../windows-amd64-server-upx.exe || echo "UPX压缩失败，跳过"
-
-      - name: 上传Windows产物
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-binaries
-          path: |
-            windows-amd64-server.exe
-            windows-amd64-server-upx.exe
-
-  # ========== Linux 编译（纯主机，分AMD64/ARM64，无Docker） ==========
   build-linux-amd64:
     runs-on: ubuntu-latest
     steps:
+      # 步骤1：仅拉取代码，无多余依赖
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Go
+      # 步骤2：仅安装Go环境，无其他工具
+      - name: Set up Go 1.24.2
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version: '1.24.2'
           cache: true
 
-      - name: 安装Linux依赖（直接装系统libopus）
+      # 步骤3：禁用CGO，跳过所有C依赖（核心！避开libopus/编译链问题）
+      - name: Build Linux binary (NO CGO)
         run: |
-          sudo apt update -y
-          sudo apt install -y --no-install-recommends \
-            build-essential pkg-config libopus-dev upx-ucl
-
-      - name: 编译Linux AMD64二进制
-        run: |
-          export CGO_ENABLED=1
-          export GOOS=linux
-          export GOARCH=amd64
-          
           cd src
-          go mod tidy
-          go build -v \
-            -ldflags "-s -w -extldflags '-static'" \
-            -o ../linux-amd64-server
-          
-          # 压缩二进制
-          cp ../linux-amd64-server ../linux-amd64-server-upx
-          upx --lzma ../linux-amd64-server-upx || echo "UPX压缩失败，跳过"
+          # 禁用CGO，彻底避开所有C库依赖和编译错误
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -v -ldflags "-s -w" -o ../linux-amd64-server
 
-      - name: 上传Linux AMD64产物
+      # 步骤4：仅上传产物，无压缩/复杂操作
+      - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: linux-binaries-amd64
-          path: |
-            linux-amd64-server
-            linux-amd64-server-upx
+          name: linux-amd64-server
+          path: linux-amd64-server
 
-  build-linux-arm64:
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: 安装ARM64依赖
-        run: |
-          sudo apt update -y
-          sudo apt install -y --no-install-recommends \
-            build-essential pkg-config libopus-dev upx-ucl
-
-      - name: 编译Linux ARM64二进制
-        run: |
-          export CGO_ENABLED=1
-          export GOOS=linux
-          export GOARCH=arm64
-          
-          cd src
-          go mod tidy
-          go build -v \
-            -ldflags "-s -w -extldflags '-static'" \
-            -o ../linux-arm64-server
-          
-          # 压缩二进制
-          cp ../linux-arm64-server ../linux-arm64-server-upx
-          upx --lzma ../linux-arm64-server-upx || echo "UPX压缩失败，跳过"
-
-      - name: 上传Linux ARM64产物
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-binaries-arm64
-          path: |
-            linux-arm64-server
-            linux-arm64-server-upx
-
-  # ========== Android 编译（纯主机，无Docker） ==========
-  build-android:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - arch: arm64
-            target: aarch64-linux-android
-            target_arch: arm64-v8a
-          - arch: arm
-            target: armv7a-linux-androideabi
-            target_arch: armeabi-v7a
-    env:
-      NDK_VERSION: r26d
-      ANDROID_API: 21
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-
-      - name: 安装Android依赖
-        run: |
-          sudo apt update -y
-          sudo apt install -y --no-install-recommends \
-            pkg-config wget unzip build-essential autoconf automake libtool
-
-      - name: 下载并解压NDK
-        id: cache-ndk
-        run: |
-          if [ ! -d "android-ndk-${NDK_VERSION}" ]; then
-            wget -q https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip
-            unzip -q android-ndk-${NDK_VERSION}-linux.zip
-          fi
-          echo "NDK_DIR=$PWD/android-ndk-${NDK_VERSION}" >> $GITHUB_ENV
-          echo "TOOLCHAIN=$PWD/android-ndk-${NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64" >> $GITHUB_ENV
-
-      - name: 编译Android版libopus
-        run: |
-          wget -q https://archive.mozilla.org/pub/opus/opus-${OPUS_VERSION}.tar.gz
-          tar xf opus-${OPUS_VERSION}.tar.gz
-          cd opus-${OPUS_VERSION}
-          
-          export TARGET=${{ matrix.target }}
-          export API=${ANDROID_API}
-          export CC=${{ env.TOOLCHAIN }}/bin/${TARGET}${API}-clang
-          export AR=${{ env.TOOLCHAIN }}/bin/llvm-ar
-          export CFLAGS="--sysroot=${{ env.TOOLCHAIN }}/sysroot"
-          
-          ./configure \
-            --prefix="$HOME/libopus-android" \
-            --host=$TARGET \
-            --enable-static --disable-shared \
-            CC=$CC AR=$AR CFLAGS="$CFLAGS"
-          make -j$(nproc)
-          make install
-          cd ..
-
-      - name: 编译Android二进制
-        run: |
-          export CGO_ENABLED=1
-          export GOOS=android
-          export GOARCH=${{ matrix.arch }}
-          export CC=${{ env.TOOLCHAIN }}/bin/${{ matrix.target }}${ANDROID_API}-clang
-          export CGO_CFLAGS="--sysroot=${{ env.TOOLCHAIN }}/sysroot -I$HOME/libopus-android/include"
-          export CGO_LDFLAGS="-L$HOME/libopus-android/lib -lopus -lm"
-          
-          cd src
-          go mod tidy
-          go build -v \
-            -ldflags "-s -w" \
-            -o ../android-${{ matrix.arch }}-server
-
-      - name: 上传Android产物
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-${{ matrix.arch }}-server
-          path: android-${{ matrix.arch }}-server
-
-  # ========== Release 环节（整合所有产物） ==========
-  release:
-    needs:
-      - build-windows-amd64
-      - build-linux-amd64
-      - build-linux-arm64
-      - build-android
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
-    steps:
-      - name: 下载所有编译产物
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: 创建GitHub Release
+      # 步骤5：仅在打Tag时创建Release（可选）
+      - name: Create Release (only for tags)
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-          files: |
-            artifacts/android-arm64-server
-            artifacts/android-arm-server
-            artifacts/windows-binaries/windows-amd64-server.exe
-            artifacts/windows-binaries/windows-amd64-server-upx.exe
-            artifacts/linux-binaries-amd64/linux-amd64-server
-            artifacts/linux-binaries-amd64/linux-amd64-server-upx
-            artifacts/linux-binaries-arm64/linux-arm64-server
-            artifacts/linux-binaries-arm64/linux-arm64-server-upx
+          files: linux-amd64-server
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
