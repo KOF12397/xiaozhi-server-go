@@ -301,6 +301,7 @@ func StartHttpServer(
 			mattermostGroup := apiGroup.Group("/mattermost")
 			{
 				mattermostGroup.POST("/send", mattermostHandler.Send)
+				mattermostGroup.GET("/health", mattermostHandler.Health)  // 新增健康检查
 			}
 			logger.Info("Mattermost服务已启动，路由: /api/mattermost/send")
 		}
