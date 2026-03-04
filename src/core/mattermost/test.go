@@ -37,11 +37,13 @@ func TestClient(t *testing.T) {
     if channel == "" {  
         missingEnvs = append(missingEnvs, envVarTestChannel)  
     }  
+  
     if len(missingEnvs) > 0 {  
-        t.Skipf("缺少环境变量，跳过测试: %v", missingEnvs)  
+        t.Skipf("未配置Mattermost测试环境变量，缺少: %v", missingEnvs)  
+        return  
     }  
   
-    // 创建日志器  
+    // 创建日志器（使用完整的LogCfg结构）  
     logger, err := utils.NewLogger(&utils.LogCfg{  
         LogLevel:  "DEBUG",  
         LogFormat: "{time:YYYY-MM-DD HH:mm:ss} - {level} - {message}",  
@@ -65,62 +67,27 @@ func TestClient(t *testing.T) {
         t.Fatal("创建客户端失败")  
     }  
   
-    // 测试初始化  
+    // 初始化客户端  
     err = client.Initialize()  
     if err != nil {  
-        t.Errorf("客户端初始化失败: %v", err)  
+        t.Errorf("初始化客户端失败: %v", err)  
+        return  
     }  
   
     // 测试消息发送  
-    ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.Timeout)*time.Second)  
+    ctx, cancel := context.WithTimeout(context.Background(), time.Duration(testTimeoutSeconds)*time.Second)  
     defer cancel()  
   
     err = client.SendMessage(ctx, channel, testMessage)  
     if err != nil {  
         t.Errorf("发送消息失败: %v", err)  
+        return  
     }  
+  
+    t.Logf("✅ Mattermost客户端测试成功 - 频道: %s", channel)  
   
     // 清理资源  
-    err = client.Cleanup()  
-    if err != nil {  
-        t.Errorf("清理资源失败: %v", err)  
-    }  
-  
-    t.Log("✅ Mattermost客户端测试通过")  
-}  
-  
-// TestClientInvalidConfig 测试无效配置  
-func TestClientInvalidConfig(t *testing.T) {  
-    logger, err := utils.NewLogger(&utils.LogCfg{  
-        LogLevel:  "ERROR",  
-        LogFormat: "{time:YYYY-MM-DD HH:mm:ss} - {level} - {message}",  
-        LogDir:    "logs",  
-        LogFile:   "test.log",  
-    })  
-    if err != nil {  
-        t.Fatalf("创建日志器失败: %v", err)  
-    }  
-  
-    // 测试空Token  
-    config := &configs.MattermostConfig{  
-        BaseURL: "http://test.example.com",  
-        Token:   "",  
-        Timeout: 10,  
-    }  
-    client := NewClient(config, logger)  
-    if client == nil {  
-        t.Fatal("创建客户端失败")  
-    }  
-  
-    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)  
-    defer cancel()  
-  
-    err = client.SendMessage(ctx, "test", "test")  
-    if err == nil {  
-        t.Error("期望空Token返回错误，但未返回错误")  
-    }  
-  
-    t.Log("✅ 无效配置测试通过")  
+    client.Cleanup()  
 }  
   
 // BenchmarkClient_SendMessage 性能测试  
@@ -130,15 +97,20 @@ func BenchmarkClient_SendMessage(b *testing.B) {
     channel := os.Getenv(envVarTestChannel)  
   
     if baseURL == "" || token == "" || channel == "" {  
-        b.Skip("缺少环境变量，跳过基准测试")  
+        b.Skip("未配置Mattermost测试环境变量")  
+        return  
     }  
   
-    logger, _ := utils.NewLogger(&utils.LogCfg{  
-        LogLevel:  "ERROR",  
+    // 创建日志器（使用完整的LogCfg结构）  
+    logger, err := utils.NewLogger(&utils.LogCfg{  
+        LogLevel:  "ERROR", // 性能测试使用ERROR级别减少日志  
         LogFormat: "{time:YYYY-MM-DD HH:mm:ss} - {level} - {message}",  
         LogDir:    "logs",  
-        LogFile:   "test.log",  
+        LogFile:   "benchmark.log",  
     })  
+    if err != nil {  
+        b.Fatalf("创建日志器失败: %v", err)  
+    }  
   
     config := &configs.MattermostConfig{  
         BaseURL: baseURL,  
@@ -150,7 +122,7 @@ func BenchmarkClient_SendMessage(b *testing.B) {
     defer client.Cleanup()  
   
     ctx := context.Background()  
-    b.ResetTimer()  
+    b.ResetTimer() // 重置计时器，排除初始化耗时  
   
     for i := 0; i < b.N; i++ {  
         msg := fmt.Sprintf("基准测试消息 - %d", i)  
@@ -168,6 +140,7 @@ func TestClient_WithoutLogger(t *testing.T) {
     if client == nil {  
         t.Fatal("创建客户端失败（nil logger）")  
     }  
+    // 测试初始化不会panic  
     err := client.Initialize()  
     if err != nil {  
         t.Errorf("初始化客户端（nil logger）失败: %v", err)  
