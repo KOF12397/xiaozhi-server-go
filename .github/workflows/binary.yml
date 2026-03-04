@@ -267,6 +267,6 @@ jobs:
             artifacts/linux-amd64-server  
             artifacts/linux-amd64-server-upx  
             artifacts/linux-arm64-server  
-            artifacts-linux-arm64-server-upx  
+            artifacts/linux-arm64-server-upx  
         env:  
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
