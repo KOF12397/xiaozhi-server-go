@@ -1,59 +1,58 @@
-package mattermost
-
-import (
-	"context"
-	"os"
-	"testing"
-	"time"
-	"xiaozhi-server-go/src/configs"
-	"xiaozhi-server-go/src/core/utils"
-)
-
-// TestClient 测试Mattermost客户端
-func TestClient(t *testing.T) {
-	// 优先从环境变量读取测试配置
-	baseURL := os.Getenv("MATTERMOST_BASE_URL")
-	token := os.Getenv("MATTERMOST_TOKEN")
-	channel := os.Getenv("MATTERMOST_TEST_CHANNEL")
-
-	if baseURL == "" || token == "" || channel == "" {
-		t.Skip("未配置Mattermost测试环境变量，跳过测试")
-	}
-
-	config := &configs.MattermostConfig{
-		BaseURL: baseURL,
-		Token:   token,
-		Timeout: 10,
-	}
-
-	// 创建日志器
-	logger, err := utils.NewLogger(&utils.LogCfg{
-		LogLevel:  "DEBUG",
-		LogFormat: "{time:YYYY-MM-DD HH:mm:ss} - {level} - {message}",
-		LogDir:    "logs",
-		LogFile:   "test.log",
-	})
-
-	// 创建客户端
-	client := NewClient(config, logger)
-
-	// 测试初始化
-	if err := client.Initialize(); err != nil {
-		t.Fatalf("初始化失败: %v", err)
-	}
-
-	// 测试发送消息（需要真实的测试环境）
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.Timeout)*time.Second)
-	defer cancel()
-	err = client.SendMessage(ctx, channel, "测试消息")
-	if err != nil {
-		t.Logf("发送消息失败（可能是配置问题）: %v", err)
-	} else {
-		t.Log("发送消息成功")
-	}
-
-	// 清理资源
-	if err := client.Cleanup(); err != nil {
-		t.Errorf("清理失败: %v", err)
-	}
-}
+name: Test Mattermost Integration  
+  
+on:  
+  push:  
+    branches: [ "main" ]  
+  pull_request:  
+    branches: [ "main" ]  
+  workflow_dispatch:  
+  
+jobs:  
+  test:  
+    runs-on: ubuntu-latest  
+    steps:  
+      - name: Checkout code  
+        uses: actions/checkout@v3  
+  
+      - name: Set up Go  
+        uses: actions/setup-go@v4  
+        with:  
+          go-version: '1.24.2'  
+  
+      - name: Install dependencies  
+        run: |  
+          sudo apt-get update  
+          sudo apt-get install -y build-essential pkg-config autoconf automake libtool wget  
+  
+      - name: Download and build libopus  
+        run: |  
+          wget https://archive.mozilla.org/pub/opus/opus-1.3.1.tar.gz  
+          tar xf opus-1.3.1.tar.gz  
+          cd opus-1.3.1  
+          ./configure --enable-static --disable-shared --disable-doc --disable-extra-programs  
+          make -j$(nproc)  
+          sudo make install  
+          cd ..  
+  
+      - name: Run Mattermost tests  
+        env:  
+          MATTERMOST_BASE_URL: ${{ secrets.MATTERMOST_BASE_URL }}  
+          MATTERMOST_TOKEN: ${{ secrets.MATTERMOST_TOKEN }}  
+          MATTERMOST_TEST_CHANNEL: ${{ secrets.MATTERMOST_TEST_CHANNEL }}  
+        run: |  
+          export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig  
+          export CGO_ENABLED=1  
+          go test ./src/core/mattermost -v  
+  
+      - name: Run all tests  
+        run: |  
+          export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig  
+          export CGO_ENABLED=1  
+          go test ./... -v  
+  
+      - name: Build project  
+        run: |  
+          export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig  
+          export CGO_ENABLED=1  
+          go mod tidy  
+          go build -o xiaozhi-server ./src/main.go
